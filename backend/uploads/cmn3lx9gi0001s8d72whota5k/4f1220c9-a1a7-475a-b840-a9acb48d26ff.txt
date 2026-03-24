@@ -1,0 +1,27 @@
+1. Bonfrer A., Chintagunta P., Dhar S. Retail store formats, competition and shopper behavior: A systematic review / A. Bonfrer, P. Chintagunta, S. Dhar // Journal of Retailing. - 2022. - Vol. 98, No. 1. - P. 71-91. - DOI: 10.1016/j.jretai.2022.02.006.
+
+2. Kopalle P. K., Pauwels K., Akella L. Y., Gangwar M. Dynamic pricing: Definition, implications for managers, and future research directions / P. K. Kopalle, K. Pauwels, L. Y. Akella, M. Gangwar // Journal of Retailing. - 2023. - Vol. 99, No. 4. - P. 580-593. - DOI: 10.1016/j.jretai.2023.11.003.
+
+3. Reinecke S., Noll L. J. Active Price Management: Be a Price Maker, Not a Price Taker! / S. Reinecke, L. J. Noll. - Cham : Springer, 2023. - IX, 90 p. - DOI: 10.1007/978-3-031-42049-8.
+
+4. Aschersleben P., Steiner W. J. Dynamic pricing using flexible heterogeneous sales response models / P. Aschersleben, W. J. Steiner // OR Spectrum. - 2024. - Vol. 46. - P. 29-72. - DOI: 10.1007/s00291-024-00756-0.
+
+5. Gahler D., Hruschka H. Heuristic pricing rules not requiring knowledge of the price response function / D. Gahler, H. Hruschka // Review of Managerial Science. - 2023. - Vol. 17. - P. 2325-2347. - DOI: 10.1007/s11846-022-00581-1.
+
+6. Kalyanaram G., Winer R. S. Behavioral response to price: Data-based insights and future research for retailing / G. Kalyanaram, R. S. Winer // Journal of Retailing. - 2022. - Vol. 98, No. 1. - P. 46-70. - DOI: 10.1016/j.jretai.2022.02.009.
+
+7. Keller A., Vogelsang M., Totzek D. How displaying price discounts can mitigate negative customer reactions to dynamic pricing / A. Keller, M. Vogelsang, D. Totzek // Journal of Business Research. - 2022. - Vol. 148. - P. 277-291. - DOI: 10.1016/j.jbusres.2022.04.027.
+
+8. Chenarides L., Gomez M. I., Richards T. J., Yonezawa K. Retail Markups and Discount-Store Entry / L. Chenarides, M. I. Gomez, T. J. Richards, K. Yonezawa // Review of Industrial Organization. - 2024. - Vol. 64, No. 1. - P. 147-181. - DOI: 10.1007/s11151-023-09926-w.
+
+9. Hubner A., Kuhn H. Decision support for managing assortments, shelf space, and replenishment in retail / A. Hubner, H. Kuhn // Flexible Services and Manufacturing Journal. - 2024. - Vol. 36. - P. 1-35. - DOI: 10.1007/s10696-023-09492-z.
+
+10. Heger J., Klein R. Assortment optimization: a systematic literature review / J. Heger, R. Klein // OR Spectrum. - 2024. - Vol. 46. - P. 1099-1161. - DOI: 10.1007/s00291-024-00752-4.
+
+11. Wu M., Demirag O. C., Xue W., Xu M. Retail category management under shelf-space dependent demand: The effectiveness of category captainship / M. Wu, O. C. Demirag, W. Xue, M. Xu // International Journal of Production Economics. - 2024. - Vol. 276. - Art. 109365. - DOI: 10.1016/j.ijpe.2024.109365.
+
+12. Kerkhove L.-P. Data-driven Retailing: A Non-technical Practitioners' Guide / L.-P. Kerkhove. - Cham : Springer, 2022. - XV, 257 p. - DOI: 10.1007/978-3-031-12962-9.
+
+13. Stamatopoulos I., Sanders R. E., Bray R. Electronic Shelf Labels Have Not Led to Surge Pricing in US Grocery Retail, Despite Regulator Concerns / I. Stamatopoulos, R. E. Sanders, R. Bray // SSRN. - 2025. - 18 p. - DOI: 10.2139/ssrn.5271491.
+
+14. Du Beehler M. Making the case for electronic shelf labels / M. Du Beehler // NRF. - 2026. - 05 Mar. - URL: https://nrf.com/nrfcom/blog/making-the-case-for-electronic-shelf-labels (дата обращения: 09.03.2026).

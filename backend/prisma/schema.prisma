@@ -42,6 +42,7 @@ model Message {
   chatId      String
   senderId    String
   content     String
+  attachments Json?
   createdAt   DateTime  @default(now())
   deliveredAt DateTime?
   readAt      DateTime?

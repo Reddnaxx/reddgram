@@ -39,3 +39,17 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   }
   return res
 }
+
+/** Multipart: не задавать Content-Type — boundary выставит браузер. */
+export async function apiUpload(path: string, body: FormData): Promise<Response> {
+  const headers = new Headers()
+  const token = getStoredToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const res = await fetch(`/api${path}`, { method: 'POST', body, headers })
+  if (!res.ok) {
+    throw new ApiError(await parseErrorMessage(res), res.status)
+  }
+  return res
+}

@@ -30,6 +30,10 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   NODE_ENV?: string;
+
+  @IsOptional()
+  @IsString()
+  UPLOAD_DIR?: string;
 }
 
 const ENV_DEFAULTS: Record<string, string> = {

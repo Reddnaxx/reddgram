@@ -8,6 +8,7 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -15,6 +16,7 @@ import {
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { ChatsService } from '../chats/chats.service.js';
+import { PresenceService } from './presence.service.js';
 
 type HandshakeAuth = { token?: string };
 
@@ -24,14 +26,27 @@ type HandshakeAuth = { token?: string };
     credentials: true,
   },
 })
-export class MessagesGateway implements OnGatewayConnection {
+export class MessagesGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server!: Server;
 
   constructor(
     private readonly jwt: JwtService,
     private readonly chats: ChatsService,
+    private readonly presence: PresenceService,
   ) {}
+
+  async broadcastNewMessage(
+    chatId: string,
+    dto: ReturnType<ChatsService['toMessageDto']>,
+  ): Promise<void> {
+    const participantIds = await this.chats.getParticipantUserIds(chatId);
+    for (const uid of participantIds) {
+      this.server.to(`user:${uid}`).emit('newMessage', dto);
+    }
+  }
 
   async handleConnection(client: Socket) {
     const auth = client.handshake.auth as HandshakeAuth;
@@ -48,11 +63,40 @@ export class MessagesGateway implements OnGatewayConnection {
     try {
       const payload = await this.jwt.verifyAsync<{ sub: string }>(raw);
       if (!payload?.sub) throw new Error('invalid');
-      (client.data as { userId: string }).userId = payload.sub;
-      await client.join(`user:${payload.sub}`);
+      const userId = payload.sub;
+      (client.data as { userId: string }).userId = userId;
+      await client.join(`user:${userId}`);
+
+      const becameOnline = this.presence.addSocket(userId);
+      const peerIds = await this.chats.getDistinctPeerUserIds(userId);
+      if (becameOnline) {
+        for (const peerId of peerIds) {
+          this.server
+            .to(`user:${peerId}`)
+            .emit('peerPresence', { userId, online: true as const });
+        }
+      }
+      const onlineUserIds = this.presence.onlineUserIdsAmong(peerIds);
+      this.server
+        .to(`user:${userId}`)
+        .emit('presenceSnapshot', { onlineUserIds });
     } catch {
       client.disconnect();
     }
+  }
+
+  handleDisconnect(client: Socket) {
+    const userId = (client.data as { userId?: string }).userId;
+    if (!userId) return;
+    const becameOffline = this.presence.removeSocket(userId);
+    if (!becameOffline) return;
+    void this.chats.getDistinctPeerUserIds(userId).then((peerIds) => {
+      for (const peerId of peerIds) {
+        this.server
+          .to(`user:${peerId}`)
+          .emit('peerPresence', { userId, online: false as const });
+      }
+    });
   }
 
   @SubscribeMessage('joinChat')
@@ -83,10 +127,7 @@ export class MessagesGateway implements OnGatewayConnection {
     }
     const msg = await this.chats.sendMessage(chatId, userId, content);
     const dto = this.chats.toMessageDto(msg);
-    const participantIds = await this.chats.getParticipantUserIds(chatId);
-    for (const uid of participantIds) {
-      this.server.to(`user:${uid}`).emit('newMessage', dto);
-    }
+    await this.broadcastNewMessage(chatId, dto);
     return { ok: true as const, message: dto };
   }
 

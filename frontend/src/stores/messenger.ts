@@ -2,8 +2,8 @@ import { apiFetch } from '@/shared/api/client'
 import { getStoredToken } from '@/shared/lib/auth-token'
 import { playIncomingMessageSound } from '@/shared/lib/message-sound'
 import { defineStore } from 'pinia'
-import { ref, shallowRef } from 'vue'
 import { io, type Socket } from 'socket.io-client'
+import { ref, shallowRef } from 'vue'
 import { useAuthStore } from './auth'
 
 export type ChatListItem = {
@@ -19,14 +19,34 @@ export type ChatListItem = {
   unreadCount?: number
 }
 
+export type MessageAttachmentDto = {
+  kind: 'image' | 'file'
+  url: string
+  mimeType: string
+  fileName: string
+}
+
 export type MessageDto = {
   id: string
   chatId: string
   senderId: string
   content: string
+  attachments: MessageAttachmentDto[] | null
   createdAt: string
   deliveredAt: string | null
   readAt: string | null
+}
+
+export function lastMessagePreviewFromDto(dto: MessageDto): string {
+  const t = dto.content?.trim() ?? ''
+  if (t) return t
+  const a = dto.attachments
+  if (!a?.length) return t
+  if (a.length === 1) {
+    const x = a[0]!
+    return x.kind === 'image' ? 'Фото' : `Файл: ${x.fileName}`
+  }
+  return `Вложения (${a.length})`
 }
 
 export const useMessengerStore = defineStore('messenger', () => {
@@ -34,6 +54,41 @@ export const useMessengerStore = defineStore('messenger', () => {
   const chats = ref<ChatListItem[]>([])
   /** Чат, открытый на экране (для подавления звука в активном диалоге). */
   const focusedChatId = ref<string | null>(null)
+  /** userId пиров в сети (последний снимок + инкрементальные peerPresence). */
+  const lastOnlinePeerIds = ref<Set<string>>(new Set())
+  /** Для UI: peer.id → онлайн (только для пиров из списка чатов). */
+  const peerOnline = ref<Record<string, boolean>>({})
+
+  function syncPeerOnlineFromSet() {
+    const online = lastOnlinePeerIds.value
+    const next: Record<string, boolean> = {}
+    for (const c of chats.value) {
+      const id = c.peer?.id
+      if (id) next[id] = online.has(id)
+    }
+    peerOnline.value = next
+  }
+
+  function onPresenceSnapshot(payload: { onlineUserIds?: string[] }) {
+    const ids = payload?.onlineUserIds
+    if (!Array.isArray(ids)) return
+    lastOnlinePeerIds.value = new Set(ids)
+    syncPeerOnlineFromSet()
+  }
+
+  function onPeerPresence(payload: {
+    userId?: string
+    online?: boolean
+  }) {
+    const uid = payload?.userId
+    if (typeof uid !== 'string') return
+    const online = payload?.online === true
+    const s = new Set(lastOnlinePeerIds.value)
+    if (online) s.add(uid)
+    else s.delete(uid)
+    lastOnlinePeerIds.value = s
+    syncPeerOnlineFromSet()
+  }
 
   function setFocusedChatId(id: string | null) {
     focusedChatId.value = id
@@ -42,6 +97,8 @@ export const useMessengerStore = defineStore('messenger', () => {
   function disconnectSocket() {
     socket.value?.disconnect()
     socket.value = null
+    lastOnlinePeerIds.value = new Set()
+    peerOnline.value = {}
   }
 
   function ensureSocket() {
@@ -62,6 +119,8 @@ export const useMessengerStore = defineStore('messenger', () => {
       if (focusedChatId.value === dto.chatId) return
       playIncomingMessageSound()
     })
+    s.on('presenceSnapshot', onPresenceSnapshot)
+    s.on('peerPresence', onPeerPresence)
     socket.value = s
     return s
   }
@@ -82,7 +141,7 @@ export const useMessengerStore = defineStore('messenger', () => {
     const updated: ChatListItem = {
       ...row,
       lastMessage: {
-        content: dto.content,
+        content: lastMessagePreviewFromDto(dto),
         createdAt: dto.createdAt,
       },
       unreadCount: bumpUnread ? prevUnread + 1 : prevUnread,
@@ -108,6 +167,7 @@ export const useMessengerStore = defineStore('messenger', () => {
   async function loadChats() {
     const res = await apiFetch('/chats')
     chats.value = (await res.json()) as ChatListItem[]
+    syncPeerOnlineFromSet()
   }
 
   async function searchUsers(query: string) {
@@ -160,6 +220,7 @@ export const useMessengerStore = defineStore('messenger', () => {
     socket,
     chats,
     focusedChatId,
+    peerOnline,
     setFocusedChatId,
     disconnectSocket,
     ensureSocket,
