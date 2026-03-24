@@ -1,5 +1,11 @@
 import { Transform } from 'class-transformer';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import {
   normalizePhone,
   PHONE_MAX_DIGITS,
@@ -42,14 +48,18 @@ export class RegisterDto {
   @Matches(NAME_CHARS, { message: 'invalid characters in first name' })
   firstName!: string;
 
-  @Transform(({ value }) =>
-    typeof value === 'string' ? normalizePersonName(value) : value,
-  )
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string') return value;
+    const n = normalizePersonName(value);
+    return n === '' ? undefined : n;
+  })
+  @IsOptional()
   @IsString()
-  @MinLength(1, { message: 'last name is required' })
+  @MinLength(1, { message: 'last name cannot be empty if provided' })
   @MaxLength(60)
   @Matches(NAME_CHARS, { message: 'invalid characters in last name' })
-  lastName!: string;
+  lastName?: string;
 
   @IsString()
   @MinLength(8, { message: 'password must be at least 8 characters' })

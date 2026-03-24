@@ -138,11 +138,16 @@ function goToPasswordStep() {
   errorMessage.value = null
   const fn = firstNameNorm.value
   const ln = lastNameNorm.value
-  if (!fn || !ln) {
-    errorMessage.value = 'Укажите имя и фамилию'
+  if (!fn) {
+    errorMessage.value = 'Укажите имя'
     return
   }
-  if (!PERSON_NAME_PATTERN.test(fn) || !PERSON_NAME_PATTERN.test(ln)) {
+  if (!PERSON_NAME_PATTERN.test(fn)) {
+    errorMessage.value =
+      'Допустимы буквы (в т.ч. кириллица), пробел, дефис и апостроф'
+    return
+  }
+  if (ln && !PERSON_NAME_PATTERN.test(ln)) {
     errorMessage.value =
       'Допустимы буквы (в т.ч. кириллица), пробел, дефис и апостроф'
     return
@@ -218,7 +223,7 @@ async function onSubmit() {
 const stepTitle = computed(() => {
   if (step.value === 1) return 'Регистрация'
   if (step.value === 2) return 'Выберите ник'
-  if (step.value === 3) return 'Имя и фамилия'
+  if (step.value === 3) return 'Ваше имя'
   return 'Придумайте пароль'
 })
 
@@ -232,7 +237,10 @@ const stepSubtitle = computed(() => {
   if (step.value === 3) {
     return `Ник: @${usernameNormalized.value} — как вас показывать в чатах`
   }
-  return `${firstNameNorm.value} ${lastNameNorm.value} — пароль не короче ${PASSWORD_MIN} символов`
+  const name = [firstNameNorm.value, lastNameNorm.value]
+    .filter(Boolean)
+    .join(' ')
+  return `${name} — пароль не короче ${PASSWORD_MIN} символов`
 })
 </script>
 
@@ -346,13 +354,15 @@ const stepSubtitle = computed(() => {
           />
         </div>
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium" for="reg-last-name">Фамилия</label>
+          <label class="text-sm font-medium" for="reg-last-name">
+            Фамилия <span class="text-muted-foreground font-normal">(необязательно)</span>
+          </label>
           <Input
             id="reg-last-name"
             v-model="lastName"
             type="text"
             autocomplete="family-name"
-            placeholder="Иванов"
+            placeholder="По желанию"
             @keydown.enter.prevent="goToPasswordStep"
           />
         </div>

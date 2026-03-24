@@ -38,7 +38,7 @@ export class AuthService {
         phone: dto.phone,
         username: dto.username,
         firstName: dto.firstName,
-        lastName: dto.lastName,
+        lastName: dto.lastName ?? null,
         passwordHash,
       },
     });

@@ -62,7 +62,7 @@ export const useAuthStore = defineStore('auth', {
       phone: string,
       username: string,
       firstName: string,
-      lastName: string,
+      lastName: string | undefined,
       password: string,
     ) {
       const res = await apiFetch('/auth/register', {
@@ -71,7 +71,7 @@ export const useAuthStore = defineStore('auth', {
           phone,
           username,
           firstName,
-          lastName,
+          ...(lastName ? { lastName } : {}),
           password,
         }),
       })

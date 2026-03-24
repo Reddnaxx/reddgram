@@ -1,3 +1,8 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
@@ -44,6 +49,7 @@ export class MessagesGateway implements OnGatewayConnection {
       const payload = await this.jwt.verifyAsync<{ sub: string }>(raw);
       if (!payload?.sub) throw new Error('invalid');
       (client.data as { userId: string }).userId = payload.sub;
+      await client.join(`user:${payload.sub}`);
     } catch {
       client.disconnect();
     }
@@ -76,14 +82,79 @@ export class MessagesGateway implements OnGatewayConnection {
       throw new WsException('chatId and content required');
     }
     const msg = await this.chats.sendMessage(chatId, userId, content);
-    const dto = {
-      id: msg.id,
-      chatId: msg.chatId,
-      senderId: msg.senderId,
-      content: msg.content,
-      createdAt: msg.createdAt.toISOString(),
-    };
-    this.server.to(`chat:${chatId}`).emit('newMessage', dto);
-    return { ok: true as const, id: msg.id };
+    const dto = this.chats.toMessageDto(msg);
+    const participantIds = await this.chats.getParticipantUserIds(chatId);
+    for (const uid of participantIds) {
+      this.server.to(`user:${uid}`).emit('newMessage', dto);
+    }
+    return { ok: true as const, message: dto };
+  }
+
+  @SubscribeMessage('ackDelivered')
+  async ackDelivered(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { chatId?: string; messageId?: string },
+  ) {
+    const userId = (client.data as { userId?: string }).userId;
+    if (!userId) throw new WsException('Unauthorized');
+    const chatId = body?.chatId;
+    const messageId = body?.messageId;
+    if (!chatId || !messageId) {
+      throw new WsException('chatId and messageId required');
+    }
+    try {
+      const dto = await this.chats.ackDelivered(chatId, userId, messageId);
+      this.server
+        .to(`user:${dto.senderId}`)
+        .emit('messageStatus', { updates: [dto] });
+      return { ok: true as const };
+    } catch (e: unknown) {
+      if (e instanceof NotFoundException) {
+        throw new WsException('Message not found');
+      }
+      if (e instanceof BadRequestException) {
+        throw new WsException(e.message);
+      }
+      if (e instanceof ForbiddenException) {
+        throw new WsException('Forbidden');
+      }
+      throw e;
+    }
+  }
+
+  @SubscribeMessage('markRead')
+  async markRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { chatId?: string; messageId?: string },
+  ) {
+    const userId = (client.data as { userId?: string }).userId;
+    if (!userId) throw new WsException('Unauthorized');
+    const chatId = body?.chatId;
+    const messageId = body?.messageId;
+    if (!chatId || !messageId) {
+      throw new WsException('chatId and messageId required');
+    }
+    try {
+      const updates = await this.chats.markReadUpTo(chatId, userId, messageId);
+      if (updates.length > 0) {
+        const notify = new Set<string>();
+        for (const u of updates) {
+          notify.add(u.senderId);
+        }
+        for (const sid of notify) {
+          const subset = updates.filter((u) => u.senderId === sid);
+          this.server.to(`user:${sid}`).emit('messageStatus', { updates: subset });
+        }
+      }
+      return { ok: true as const };
+    } catch (e: unknown) {
+      if (e instanceof BadRequestException) {
+        throw new WsException(e.message);
+      }
+      if (e instanceof ForbiddenException) {
+        throw new WsException('Forbidden');
+      }
+      throw e;
+    }
   }
 }

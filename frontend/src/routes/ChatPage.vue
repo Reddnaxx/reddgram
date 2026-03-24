@@ -1,20 +1,30 @@
 <script setup lang="ts">
-import { Button } from '@/shared/ui/button'
-import { Input } from '@/shared/ui/input'
-import { formatPeerTitle } from '@/shared/lib/user-display'
-import type { ChatListItem, MessageDto } from '@/stores/messenger'
-import { useAuthStore } from '@/stores/auth'
-import { useMessengerStore } from '@/stores/messenger'
-import { Send } from 'lucide-vue-next'
-import type { Socket } from 'socket.io-client'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { formatPeerTitle } from '@/shared/lib/user-display';
+import { Button } from '@/shared/ui/button';
+import { Input } from '@/shared/ui/input';
+import { ScrollArea } from '@/shared/ui/scroll-area';
+import { useAuthStore } from '@/stores/auth';
+import type { ChatListItem, MessageDto } from '@/stores/messenger';
+import { useMessengerStore } from '@/stores/messenger';
+import { Check, CheckCheck, Loader2, Send, X } from 'lucide-vue-next';
+import type { Socket } from 'socket.io-client';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 interface Row {
   id: string
+  senderId: string
   text: string
-  outgoing: boolean
   createdAt: number
+  deliveredAt: string | null
+  readAt: string | null
+  pendingAck: boolean
+  sendError: boolean
+}
+
+function isOutgoing(m: Row): boolean {
+  const uid = auth.user?.id
+  return !!uid && m.senderId === uid
 }
 
 const route = useRoute()
@@ -43,16 +53,109 @@ let socketBound: Socket | null = null
 function dtoToRow(dto: MessageDto): Row {
   return {
     id: dto.id,
+    senderId: dto.senderId,
     text: dto.content,
-    outgoing: dto.senderId === auth.user?.id,
     createdAt: new Date(dto.createdAt).getTime(),
+    deliveredAt: dto.deliveredAt ?? null,
+    readAt: dto.readAt ?? null,
+    pendingAck: false,
+    sendError: false,
   }
+}
+
+function maybeMarkRead() {
+  const s = messenger.ensureSocket()
+  const cid = chatId.value
+  if (!s?.connected || !cid) return
+  let lastIncoming: Row | undefined
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i]!
+    if (!isOutgoing(m) && !m.id.startsWith('temp-')) {
+      lastIncoming = m
+      break
+    }
+  }
+  if (!lastIncoming) return
+  s.emit('markRead', { chatId: cid, messageId: lastIncoming.id })
+  messenger.clearChatUnread(cid)
 }
 
 function onNewMessage(dto: MessageDto) {
   if (dto.chatId !== chatId.value) return
-  if (messages.value.some((m) => m.id === dto.id)) return
+  const s = messenger.ensureSocket()
+  const myId = auth.user?.id
+  const isIncoming = !!(myId && dto.senderId !== myId)
+
+  if (isIncoming) {
+    s?.emit('ackDelivered', { chatId: dto.chatId, messageId: dto.id })
+  }
+
+  const existing = messages.value.find((m) => m.id === dto.id)
+  if (existing) {
+    existing.text = dto.content
+    existing.deliveredAt = dto.deliveredAt ?? null
+    existing.readAt = dto.readAt ?? null
+    existing.pendingAck = false
+    existing.sendError = false
+    return
+  }
+
+  /** newMessage часто приходит раньше ack: сливаем с оптимистичной строкой, иначе будет дубль. */
+  if (myId && dto.senderId === myId) {
+    const tempIdx = messages.value.findIndex(
+      (m) =>
+        isOutgoing(m) &&
+        m.pendingAck &&
+        m.id.startsWith('temp-') &&
+        m.text === dto.content,
+    )
+    if (tempIdx !== -1) {
+      messages.value[tempIdx] = dtoToRow(dto)
+      return
+    }
+  }
+
   messages.value.push(dtoToRow(dto))
+
+  if (isIncoming) {
+    void nextTick(() => maybeMarkRead())
+  }
+}
+
+function onMessageStatus(payload: { updates: MessageDto[] }) {
+  for (const u of payload.updates) {
+    if (u.chatId !== chatId.value) continue
+    const row = messages.value.find((m) => m.id === u.id)
+    if (row) {
+      row.deliveredAt = u.deliveredAt ?? null
+      row.readAt = u.readAt ?? null
+    }
+  }
+}
+
+function outgoingStatusAriaLabel(m: Row): string {
+  if (m.sendError) return 'Ошибка отправки'
+  if (m.pendingAck) return 'Отправляется'
+  if (m.readAt) return 'Прочитано'
+  if (m.deliveredAt) return 'Доставлено'
+  return 'Отправлено, ожидает доставки'
+}
+
+function outgoingStatusIcon(m: Row) {
+  if (m.sendError) return X
+  if (m.pendingAck) return Loader2
+  if (m.readAt) return CheckCheck
+  if (m.deliveredAt) return CheckCheck
+  return Check
+}
+
+/** Цвета для фона страницы (не пузыря): primary-foreground там не виден на светлой теме. */
+function outgoingStatusIconClass(m: Row): string {
+  if (m.sendError) return 'text-destructive'
+  if (m.pendingAck) return 'text-muted-foreground animate-spin'
+  if (m.readAt) return 'text-primary'
+  if (m.deliveredAt) return 'text-muted-foreground'
+  return 'text-muted-foreground'
 }
 
 async function loadHistory() {
@@ -64,12 +167,14 @@ async function loadHistory() {
     messages.value = list.map(dtoToRow)
     await nextTick()
     scrollListToEnd()
+    maybeMarkRead()
   } catch {
     loadError.value = 'Не удалось загрузить сообщения'
   }
 }
 
-watch(chatId, () => {
+watch(chatId, (id) => {
+  messenger.setFocusedChatId(id || null)
   void loadHistory()
   void joinCurrentChat()
 })
@@ -83,15 +188,19 @@ async function joinCurrentChat() {
 }
 
 onMounted(() => {
+  messenger.setFocusedChatId(chatId.value || null)
   const s = messenger.ensureSocket()
   socketBound = s
   s?.on('newMessage', onNewMessage)
+  s?.on('messageStatus', onMessageStatus)
   void loadHistory()
   void joinCurrentChat()
 })
 
 onBeforeUnmount(() => {
+  messenger.setFocusedChatId(null)
   socketBound?.off('newMessage', onNewMessage)
+  socketBound?.off('messageStatus', onMessageStatus)
   socketBound = null
 })
 
@@ -115,13 +224,41 @@ function send() {
     loadError.value = 'Нет соединения с сервером'
     return
   }
+  const tempId = `temp-${crypto.randomUUID()}`
+  messages.value.push({
+    id: tempId,
+    senderId: auth.user?.id ?? '',
+    text,
+    createdAt: Date.now(),
+    deliveredAt: null,
+    readAt: null,
+    pendingAck: true,
+    sendError: false,
+  })
   draft.value = ''
+  void nextTick(() => scrollListToEnd())
+
   s.emit(
     'sendMessage',
     { chatId: id, content: text },
-    (res: { ok?: boolean } | undefined) => {
-      if (res && 'ok' in res && !res.ok) {
-        loadError.value = 'Не удалось отправить'
+    (res: { ok?: boolean; message?: MessageDto } | undefined) => {
+      if (!res?.ok || !res.message) {
+        const idx = messages.value.findIndex((m) => m.id === tempId)
+        if (idx !== -1) {
+          const row = messages.value[idx]!
+          row.sendError = true
+          row.pendingAck = false
+        }
+        return
+      }
+      const real = res.message
+      const tempIdx = messages.value.findIndex((m) => m.id === tempId)
+      if (tempIdx !== -1) {
+        messages.value[tempIdx] = dtoToRow(real)
+        return
+      }
+      if (!messages.value.some((m) => m.id === real.id)) {
+        messages.value.push(dtoToRow(real))
       }
     },
   )
@@ -135,7 +272,7 @@ function onInputKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col">
+  <div class="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
     <header class="border-b px-4 py-3">
       <h1 class="text-base font-semibold">
         {{ peerTitle ?? 'Чат' }}
@@ -148,7 +285,7 @@ function onInputKeydown(e: KeyboardEvent) {
       </p>
     </header>
 
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+    <ScrollArea class="min-h-0 flex-1 overflow-y-auto px-4 py-3" >
       <p
         v-if="loadError"
         class="text-destructive mb-2 text-sm"
@@ -164,22 +301,43 @@ function onInputKeydown(e: KeyboardEvent) {
       </div>
       <ul
         v-else
-        class="flex flex-col gap-2"
+        class="flex flex-col gap-3"
       >
         <li
           v-for="m in messages"
           :key="m.id"
-          :class="m.outgoing ? 'flex justify-end' : 'flex justify-start'"
+          class="flex w-full min-w-0 shrink-0"
+          :class="isOutgoing(m) ? 'justify-end' : 'justify-start'"
         >
-          <span
+          <div
             :class="
-              m.outgoing
-                ? 'bg-primary text-primary-foreground max-w-[min(100%,28rem)] rounded-2xl rounded-br-md px-3 py-2 text-sm'
-                : 'bg-muted text-foreground max-w-[min(100%,28rem)] rounded-2xl rounded-bl-md px-3 py-2 text-sm'
+              isOutgoing(m)
+                ? 'flex w-fit max-w-[min(100%,28rem)] min-w-0 flex-col items-end gap-0.5'
+                : 'flex w-fit max-w-[min(100%,28rem)] min-w-0 flex-col items-start'
             "
           >
-            {{ m.text }}
-          </span>
+            <span
+              :class="
+                isOutgoing(m)
+                  ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-md px-3 py-2 text-sm'
+                  : 'bg-muted text-foreground rounded-2xl rounded-bl-md px-3 py-2 text-sm'
+              "
+            >
+              {{ m.text }}
+            </span>
+            <span
+              v-if="isOutgoing(m)"
+              class="flex min-h-[1.125rem] items-center justify-end gap-0.5 px-0.5 pt-0.5"
+              :aria-label="outgoingStatusAriaLabel(m)"
+              role="img"
+            >
+              <component
+                :is="outgoingStatusIcon(m)"
+                :class="['size-4 shrink-0 stroke-[2.25]', outgoingStatusIconClass(m)]"
+                aria-hidden="true"
+              />
+            </span>
+          </div>
         </li>
       </ul>
       <div
@@ -187,7 +345,7 @@ function onInputKeydown(e: KeyboardEvent) {
         class="h-px shrink-0"
         aria-hidden="true"
       />
-    </div>
+    </ScrollArea>
 
     <footer class="border-t p-3">
       <form

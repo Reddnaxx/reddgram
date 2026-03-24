@@ -1,8 +1,10 @@
 import { apiFetch } from '@/shared/api/client'
 import { getStoredToken } from '@/shared/lib/auth-token'
+import { playIncomingMessageSound } from '@/shared/lib/message-sound'
 import { defineStore } from 'pinia'
 import { ref, shallowRef } from 'vue'
 import { io, type Socket } from 'socket.io-client'
+import { useAuthStore } from './auth'
 
 export type ChatListItem = {
   id: string
@@ -14,6 +16,7 @@ export type ChatListItem = {
     lastName: string | null
   } | null
   lastMessage: { content: string; createdAt: string } | null
+  unreadCount?: number
 }
 
 export type MessageDto = {
@@ -22,11 +25,19 @@ export type MessageDto = {
   senderId: string
   content: string
   createdAt: string
+  deliveredAt: string | null
+  readAt: string | null
 }
 
 export const useMessengerStore = defineStore('messenger', () => {
   const socket = shallowRef<Socket | null>(null)
   const chats = ref<ChatListItem[]>([])
+  /** Чат, открытый на экране (для подавления звука в активном диалоге). */
+  const focusedChatId = ref<string | null>(null)
+
+  function setFocusedChatId(id: string | null) {
+    focusedChatId.value = id
+  }
 
   function disconnectSocket() {
     socket.value?.disconnect()
@@ -45,6 +56,11 @@ export const useMessengerStore = defineStore('messenger', () => {
     })
     s.on('newMessage', (dto: MessageDto) => {
       applyMessageToChatList(dto)
+      const auth = useAuthStore()
+      const myId = auth.user?.id
+      if (!myId || dto.senderId === myId) return
+      if (focusedChatId.value === dto.chatId) return
+      playIncomingMessageSound()
     })
     socket.value = s
     return s
@@ -57,16 +73,35 @@ export const useMessengerStore = defineStore('messenger', () => {
       return
     }
     const row = chats.value[idx]!
+    const auth = useAuthStore()
+    const myId = auth.user?.id
+    const isIncoming = !!(myId && dto.senderId !== myId)
+    const bumpUnread =
+      isIncoming && focusedChatId.value !== dto.chatId
+    const prevUnread = row.unreadCount ?? 0
     const updated: ChatListItem = {
       ...row,
       lastMessage: {
         content: dto.content,
         createdAt: dto.createdAt,
       },
+      unreadCount: bumpUnread ? prevUnread + 1 : prevUnread,
     }
     chats.value = [
       updated,
       ...chats.value.filter((c) => c.id !== dto.chatId),
+    ]
+  }
+
+  function clearChatUnread(chatId: string) {
+    const idx = chats.value.findIndex((c) => c.id === chatId)
+    if (idx === -1) return
+    const row = chats.value[idx]!
+    if ((row.unreadCount ?? 0) === 0) return
+    const updated: ChatListItem = { ...row, unreadCount: 0 }
+    chats.value = [
+      updated,
+      ...chats.value.filter((c) => c.id !== chatId),
     ]
   }
 
@@ -124,10 +159,13 @@ export const useMessengerStore = defineStore('messenger', () => {
   return {
     socket,
     chats,
+    focusedChatId,
+    setFocusedChatId,
     disconnectSocket,
     ensureSocket,
     loadChats,
     applyMessageToChatList,
+    clearChatUnread,
     searchUsers,
     createChat,
     fetchMessages,

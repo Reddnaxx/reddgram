@@ -194,7 +194,7 @@ function onResizeEdgePointerDown(e: PointerEvent) {
               <Input
                 v-model="userSearchQuery"
                 type="search"
-                placeholder="Телефон или @ник"
+                placeholder="Поиск"
                 class="h-8 w-full pl-9 shadow-none"
                 autocomplete="off"
                 @input="scheduleUserSearch"

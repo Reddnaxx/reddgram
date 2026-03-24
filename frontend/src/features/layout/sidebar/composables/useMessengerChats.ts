@@ -11,6 +11,7 @@ function toMessengerItem(c: ChatListItem): MessengerChatItem {
     id: c.id,
     title: peer ? formatPeerTitle(peer) : 'Чат',
     subtitle: c.lastMessage?.content,
+    unreadCount: c.unreadCount ?? 0,
   }
 }
 

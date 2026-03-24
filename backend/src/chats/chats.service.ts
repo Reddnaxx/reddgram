@@ -4,8 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service.js';
 import { computeDmPairKey } from '../common/lib/dm.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 
 export const MAX_MESSAGE_LENGTH = 4000;
 const DEFAULT_PAGE_SIZE = 50;
@@ -22,6 +22,14 @@ export class ChatsService {
     if (!row) {
       throw new ForbiddenException('Not a participant of this chat');
     }
+  }
+
+  async getParticipantUserIds(chatId: string): Promise<string[]> {
+    const rows = await this.prisma.chatParticipant.findMany({
+      where: { chatId },
+      select: { userId: true },
+    });
+    return rows.map((r) => r.userId);
   }
 
   async getOrCreateDm(userId: string, peerUserId: string) {
@@ -120,7 +128,27 @@ export class ChatsService {
       return tb - ta;
     });
 
-    return items;
+    const chatIds = items.map((i) => i.id);
+    if (chatIds.length === 0) {
+      return [];
+    }
+    const unreadGroups = await this.prisma.message.groupBy({
+      by: ['chatId'],
+      where: {
+        chatId: { in: chatIds },
+        senderId: { not: userId },
+        readAt: null,
+      },
+      _count: { _all: true },
+    });
+    const unreadMap = new Map(
+      unreadGroups.map((g) => [g.chatId, g._count._all]),
+    );
+
+    return items.map((item) => ({
+      ...item,
+      unreadCount: unreadMap.get(item.id) ?? 0,
+    }));
   }
 
   async getMessages(
@@ -140,9 +168,8 @@ export class ChatsService {
       });
       const messages = rows.slice().reverse();
       return {
-        messages: messages.map(this.toMessageDto),
-        nextCursor:
-          rows.length === limit ? (messages[0]?.id ?? null) : null,
+        messages: messages.map((m) => this.toMessageDto(m)),
+        nextCursor: rows.length === limit ? (messages[0]?.id ?? null) : null,
       };
     }
 
@@ -159,10 +186,7 @@ export class ChatsService {
         OR: [
           { createdAt: { lt: anchor.createdAt } },
           {
-            AND: [
-              { createdAt: anchor.createdAt },
-              { id: { lt: anchor.id } },
-            ],
+            AND: [{ createdAt: anchor.createdAt }, { id: { lt: anchor.id } }],
           },
         ],
       },
@@ -172,9 +196,8 @@ export class ChatsService {
 
     const messages = older.slice().reverse();
     return {
-      messages: messages.map(this.toMessageDto),
-      nextCursor:
-        older.length === limit ? (messages[0]?.id ?? null) : null,
+      messages: messages.map((m) => this.toMessageDto(m)),
+      nextCursor: older.length === limit ? (messages[0]?.id ?? null) : null,
     };
   }
 
@@ -197,12 +220,81 @@ export class ChatsService {
     return message;
   }
 
-  private toMessageDto(m: {
+  async ackDelivered(chatId: string, userId: string, messageId: string) {
+    await this.ensureParticipant(chatId, userId);
+    const msg = await this.prisma.message.findFirst({
+      where: { id: messageId, chatId },
+    });
+    if (!msg) {
+      throw new NotFoundException('Message not found');
+    }
+    if (msg.senderId === userId) {
+      throw new BadRequestException('Cannot ack own message');
+    }
+    const now = new Date();
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { deliveredAt: msg.deliveredAt ?? now },
+    });
+    return this.toMessageDto(updated);
+  }
+
+  /** Помечает прочитанными все сообщения от собеседника вплоть до якоря (включительно). */
+  async markReadUpTo(chatId: string, readerId: string, messageId: string) {
+    await this.ensureParticipant(chatId, readerId);
+    const anchor = await this.prisma.message.findFirst({
+      where: { id: messageId, chatId },
+    });
+    if (!anchor) {
+      throw new BadRequestException('Invalid message');
+    }
+    if (anchor.senderId === readerId) {
+      throw new BadRequestException('Cannot mark own messages as read');
+    }
+
+    const rows = await this.prisma.message.findMany({
+      where: {
+        chatId,
+        senderId: { not: readerId },
+        readAt: null,
+        OR: [
+          { createdAt: { lt: anchor.createdAt } },
+          {
+            AND: [
+              { createdAt: anchor.createdAt },
+              { id: { lte: anchor.id } },
+            ],
+          },
+        ],
+      },
+    });
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.$transaction(
+      rows.map((row) =>
+        this.prisma.message.update({
+          where: { id: row.id },
+          data: {
+            readAt: now,
+            deliveredAt: row.deliveredAt ?? now,
+          },
+        }),
+      ),
+    );
+    return updated.map((m) => this.toMessageDto(m));
+  }
+
+  toMessageDto(m: {
     id: string;
     chatId: string;
     senderId: string;
     content: string;
     createdAt: Date;
+    deliveredAt: Date | null;
+    readAt: Date | null;
   }) {
     return {
       id: m.id,
@@ -210,6 +302,8 @@ export class ChatsService {
       senderId: m.senderId,
       content: m.content,
       createdAt: m.createdAt.toISOString(),
+      deliveredAt: m.deliveredAt?.toISOString() ?? null,
+      readAt: m.readAt?.toISOString() ?? null,
     };
   }
 }

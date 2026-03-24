@@ -38,13 +38,15 @@ model ChatParticipant {
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  chatId    String
-  senderId  String
-  content   String
-  createdAt DateTime @default(now())
-  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  chatId      String
+  senderId    String
+  content     String
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+  readAt      DateTime?
+  chat        Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender      User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([chatId, createdAt])
 }
